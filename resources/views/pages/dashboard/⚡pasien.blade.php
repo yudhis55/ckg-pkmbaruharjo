@@ -201,9 +201,9 @@ new class extends Component {
     {{-- <flux:text class="mt-2 mb-6 text-base">Here's what's new today</flux:text> --}}
     <flux:separator variant="subtle" class="mb-2" />
 
-    <div class="my-3 flex flex-wrap items-center gap-3">
+    {{-- <div class="my-3 flex flex-wrap items-center gap-3">
         <flux:text class="text-xs" variant="subtle">Update terakhir: 2023-10-01 08:30:00</flux:text>
-    </div>
+    </div> --}}
 
     {{-- <div class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         <div class="rounded-lg bg-zinc-50 px-6 py-4 dark:bg-zinc-700">

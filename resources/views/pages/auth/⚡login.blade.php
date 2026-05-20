@@ -63,11 +63,13 @@ new #[Layout('layouts::auth')] class extends Component {
     <div class="flex-1 flex justify-center items-center">
         <div class="w-80 max-w-80 space-y-6">
             <div class="flex justify-center opacity-100">
-                <img src="{{ asset('logo/logo-pkm.png') }}" alt="Logo Puskesmas Baruharjo"
-                    class="h-20 w-auto object-contain" />
+                <img src="{{ asset('logo/logo-monica.svg') }}" alt="Logo Puskesmas Baruharjo"
+                    class="h-25 w-auto object-contain" />
             </div>
 
-            <flux:heading class="text-center" size="xl">Aplikasi Pintar Siap Saji</flux:heading>
+            {{-- <flux:heading class="text-center" size="lg">Monitoring Kinerja dan Capaian CKG</flux:heading> --}}
+            {{-- <flux:heading class="text-center" size="lg">Monitoring Kinerja dan Capaian CKG</flux:heading> --}}
+
 
             <flux:separator text="Login untuk melanjutkan" />
 

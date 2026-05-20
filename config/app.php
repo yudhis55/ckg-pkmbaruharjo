@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'SAPI - Aplikasi Pintar Siap Saji'),
+    'name' => env('APP_NAME', 'MONICA - Monitoring Kinerja dan Capaian CKG'),
 
     /*
     |--------------------------------------------------------------------------

@@ -25,7 +25,7 @@
         <flux:sidebar.header>
             {{-- <flux:sidebar.brand href="#" logo="/logo/logo-pkm.png"
                 logo:dark="https://fluxui.dev/img/demo/dark-mode-logo.png" name="CKG PKM Baruharjo" /> --}}
-            <flux:sidebar.brand href="#" logo="/logo/logo-pkm.png" name="SAPI" />
+            <flux:sidebar.brand href="#" logo="/logo/logo-pkm.png" name="MONICA" />
             <flux:sidebar.collapse
                 class="in-data-flux-sidebar-on-desktop:not-in-data-flux-sidebar-collapsed-desktop:-mr-2" />
         </flux:sidebar.header>
@@ -36,12 +36,17 @@
                 Klaim Pasien</flux:sidebar.item>
             <flux:sidebar.item icon="document-chart-bar" href="{{ route('capaian-individu') }}"
                 :current="request()->routeIs('capaian-individu')">Capaian Individu</flux:sidebar.item>
-            <flux:sidebar.item icon="arrow-path" href="{{ route('sinkron-data') }}"
-                :current="request()->routeIs('sinkron-data')">Sinkron Data</flux:sidebar.item>
-            <flux:sidebar.item icon="cog-6-tooth" href="{{ route('pengaturan') }}"
-                :current="request()->routeIs('pengaturan')">Pengaturan</flux:sidebar.item>
-            <flux:sidebar.item icon="user" href="{{ route('profil-saya') }}"
-                :current="request()->routeIs('profil-saya')">Profil Saya</flux:sidebar.item>
+            @if (Auth::user()->role == 'admin')
+                <flux:sidebar.item icon="arrow-path" href="{{ route('sinkron-data') }}"
+                    :current="request()->routeIs('sinkron-data')">Sinkron Data</flux:sidebar.item>
+                <flux:sidebar.item icon="arrow-path" href="{{ route('sinkronisasi') }}"
+                    :current="request()->routeIs('sinkronisasi')">Sinkronisasi</flux:sidebar.item>
+                <flux:sidebar.item icon="cog-6-tooth" href="{{ route('pengaturan') }}"
+                    :current="request()->routeIs('pengaturan')">Pengaturan</flux:sidebar.item>
+                <flux:sidebar.item icon="user" href="{{ route('profil-saya') }}"
+                    :current="request()->routeIs('profil-saya')">Profil Saya</flux:sidebar.item>
+            @endif
+
         </flux:sidebar.nav>
         <flux:sidebar.spacer />
         <flux:sidebar.nav>

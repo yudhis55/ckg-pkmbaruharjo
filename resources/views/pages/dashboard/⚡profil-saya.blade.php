@@ -18,7 +18,8 @@ new class extends Component {
                 <flux:text class="mt-1" variant="subtle">Ubah foto profil akun Anda.</flux:text>
 
                 <div class="mt-6 flex flex-col items-center gap-4">
-                    <flux:avatar src="https://ui-avatars.com/api/?name=Profil+Saya&size=160" size="2xl" />
+                    {{-- <flux:avatar src="https://ui-avatars.com/api/?name=Profil+Saya&size=160" size="2xl" /> --}}
+                    <flux:avatar name="{{ Auth::user()->name }}"></flux:avatar>
                     <flux:text variant="subtle" class="text-sm text-center">Format JPG/PNG, maksimal 2MB</flux:text>
                     <flux:input type="file" />
                     <div class="flex w-full gap-2">

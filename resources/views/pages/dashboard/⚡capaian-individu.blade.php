@@ -146,6 +146,21 @@ new class extends Component {
     }
 
     #[Computed]
+    public function pasienBulanIni()
+    {
+        $month = now()->month;
+
+        return $this->baseScopeQuery()
+            ->get(['register_date'])
+            ->filter(function ($item) use ($month) {
+                $date = $this->parsedDate($item->register_date);
+
+                return $date && (int) $date->month === (int) $month;
+            })
+            ->count();
+    }
+
+    #[Computed]
     public function chartOptions()
     {
         $collection = $this->baseScopeQuery()->get(['register_date', 'kel', 'pegawai_id']);
@@ -298,12 +313,29 @@ new class extends Component {
 ?>
 
 <script>
-    window._chartOpts = {
-        ...(window._chartOpts ?? {}),
-        ...@js($this->chartOptions),
+    const syncCapaianChartOptionsFromDom = () => {
+        const holder = document.getElementById('capaian-individu-chart-options');
+
+        if (!holder) {
+            return;
+        }
+
+        try {
+            const options = JSON.parse(holder.dataset.options || '{}');
+            window._chartOpts = {
+                ...(window._chartOpts ?? {}),
+                ...options,
+            };
+        } catch (e) {
+            // Ignore malformed JSON and keep the previous chart options.
+        }
     };
 
+    syncCapaianChartOptionsFromDom();
+
     const reinitCapaianCharts = () => {
+        syncCapaianChartOptionsFromDom();
+
         document.querySelectorAll('[data-individu-chart]').forEach((element) => {
             const key = element.getAttribute('data-individu-chart');
 
@@ -328,10 +360,24 @@ new class extends Component {
                 reinitCapaianCharts();
             });
         });
+
+        Livewire.hook('morph.updated', () => {
+            requestAnimationFrame(() => {
+                reinitCapaianCharts();
+            });
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        requestAnimationFrame(() => {
+            reinitCapaianCharts();
+        });
     });
 </script>
 
 <flux:main>
+    <div id="capaian-individu-chart-options" class="hidden" data-options='@json($this->chartOptions)'></div>
+
     <div class="mb-6 flex items-center justify-between gap-3">
         <flux:heading size="xl" level="1">Capaian Individu</flux:heading>
         <flux:select wire:model.live="tahun_session" class="w-36" placeholder="Pilih tahun...">
@@ -412,7 +458,7 @@ new class extends Component {
                 <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Total Pasien
                     Saya</p>
                 <p class="mt-1 text-3xl font-bold text-zinc-800 dark:text-zinc-100">
-                    23</p>
+                    {{ number_format($this->summary['total'], 0, ',', '.') }}</p>
                 <p class="mt-1 text-xs text-zinc-400">Jumlah pasien tahun {{ $tahun_session }}</p>
             </div>
             <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/30">
@@ -450,11 +496,13 @@ new class extends Component {
         <div
             class="relative rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-5 py-4 flex items-start justify-between">
             <div>
-                <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Pasien Saya Bulan Ini
+                <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Pasien Saya
+                    Bulan Ini
                 </p>
                 <p class="mt-1 text-3xl font-bold text-zinc-800">
-                    23</p>
-                <p class="mt-1 text-xs text-zinc-400">Jumlah pasien bulan {{ now()->locale('id')->translatedFormat('F Y') }}</p>
+                    {{ number_format($this->pasienBulanIni, 0, ',', '.') }}</p>
+                <p class="mt-1 text-xs text-zinc-400">Jumlah pasien bulan
+                    {{ now()->locale('id')->translatedFormat('F Y') }}</p>
             </div>
             <div
                 class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-50 dark:bg-indigo-900/30">
@@ -467,21 +515,28 @@ new class extends Component {
         <div class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-800">
             <p class="mb-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">Tren Capaian per Bulan</p>
             <p class="mb-4 text-xs text-zinc-400">Jumlah pasien selesai CKG oleh pegawai terpilih</p>
-            <div data-individu-chart="capaianBulananIndividu" x-data x-init="window._initChart($el, 'capaianBulananIndividu')" class="h-72"></div>
+            <div wire:key="chart-capaian-bulanan-{{ md5(json_encode($this->chartOptions['capaianBulananIndividu'])) }}"
+                data-individu-chart="capaianBulananIndividu" x-data x-init="window._chartOpts = { ...(window._chartOpts ?? {}), capaianBulananIndividu: @js($this->chartOptions['capaianBulananIndividu']) };
+                window._initChart($el, 'capaianBulananIndividu')" class="h-72"></div>
         </div>
 
         <div class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-800">
-            <p class="mb-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">Komposisi Status Pasien</p>
+            {{-- <p class="mb-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">Komposisi Status Pasien</p>
             <p class="mb-4 text-xs text-zinc-400">Perbandingan pasien selesai, belum, dan proses</p>
-            <div data-individu-chart="statusPasienIndividu" x-data x-init="window._initChart($el, 'statusPasienIndividu')" class="h-72"></div>
+            <div data-individu-chart="statusPasienIndividu" x-data x-init="window._initChart($el, 'statusPasienIndividu')" class="h-72"></div> --}}
+            <p class="mb-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">Distribusi Pasien per Desa</p>
+            <p class="mb-4 text-xs text-zinc-400">Menampilkan sebaran domisili pasien yang ditangani</p>
+            <div wire:key="chart-desa-individu-{{ md5(json_encode($this->chartOptions['desaPasienIndividu'])) }}"
+                data-individu-chart="desaPasienIndividu" x-data x-init="window._chartOpts = { ...(window._chartOpts ?? {}), desaPasienIndividu: @js($this->chartOptions['desaPasienIndividu']) };
+                window._initChart($el, 'desaPasienIndividu')" class="h-72"></div>
         </div>
     </div>
 
-    <div class="mb-6 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-800">
+    {{-- <div class="mb-6 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-800">
         <p class="mb-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">Distribusi Pasien per Desa</p>
         <p class="mb-4 text-xs text-zinc-400">Menampilkan sebaran domisili pasien yang ditangani</p>
         <div data-individu-chart="desaPasienIndividu" x-data x-init="window._initChart($el, 'desaPasienIndividu')" class="h-72"></div>
-    </div>
+    </div> --}}
 
     <div class="mb-3 flex items-center gap-2">
         <flux:heading size="lg">Daftar Pasien</flux:heading>
@@ -503,10 +558,10 @@ new class extends Component {
             <flux:input class="w-full md:w-60" disabled value="{{ auth()->user()?->name }}" />
         @endif
 
-        <flux:select wire:model.live="statusFilter" class="w-full md:w-48" placeholder="Semua status">
+        {{-- <flux:select wire:model.live="statusFilter" class="w-full md:w-48" placeholder="Semua status">
             <flux:select.option value="sudah">Sudah CKG</flux:select.option>
             <flux:select.option value="belum">Belum CKG</flux:select.option>
-        </flux:select>
+        </flux:select> --}}
 
         <flux:spacer />
 

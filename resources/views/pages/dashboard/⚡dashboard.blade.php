@@ -13,11 +13,8 @@ new class extends Component {
     public $tahun_session;
 
     public string $bulan = '';
-    public string $statusKunjungan = '';
     public string $desa = '';
-    public string $jenisCkg = '';
     public string $klasterUsia = '';
-    public string $pekerjaan = '';
     public string $pegawai = '';
 
     private function pasienTahunQuery()
@@ -38,7 +35,7 @@ new class extends Component {
         }
     }
 
-    private function filteredPasienCollection()
+    private function filteredPasienCollection(bool $withKlasterFilter = true)
     {
         $pasien = $this->pasienTahunQuery()->get();
 
@@ -54,11 +51,70 @@ new class extends Component {
             $pasien = $pasien->where('kel', $this->desa);
         }
 
+        if ($withKlasterFilter && $this->klasterUsia !== '') {
+            $pasien = $pasien->filter(function ($item) {
+                return $this->ageClusterLabel($item->tgl_lahir, $item->register_date) === $this->klasterUsia;
+            });
+        }
+
         if ($this->pegawai !== '') {
             $pasien = $pasien->where('pegawai_id', (int) $this->pegawai);
         }
 
         return $pasien->values();
+    }
+
+    private function ageClusterLabel(?string $tglLahir, ?string $referenceDate = null): string
+    {
+        if (!$tglLahir) {
+            return '-';
+        }
+
+        try {
+            $birthDate = Carbon::parse($tglLahir);
+            $today = $this->parsedRegisterDate($referenceDate) ?? Carbon::create((int) $this->tahun_session, 12, 31);
+
+            $days = $birthDate->diffInDays($today);
+            if ($days <= 28) {
+                return '0-28h';
+            }
+
+            $months = $birthDate->diffInMonths($today);
+            if ($months >= 1 && $months <= 4) {
+                return '1-4b';
+            }
+
+            if ($months >= 5 && $months <= 11) {
+                return '5-11b';
+            }
+
+            $years = $birthDate->age;
+
+            return match (true) {
+                $years === 1 => '1t',
+                $years === 2 => '2t',
+                $years >= 3 && $years <= 4 => '3-4t',
+                $years === 5 => '5t',
+                $years === 6 => '6t',
+                $years === 7 => '7t',
+                $years >= 8 && $years <= 9 => '8-9t',
+                $years >= 10 && $years <= 12 => '10-12t',
+                $years >= 13 && $years <= 14 => '13-14t',
+                $years >= 15 && $years <= 17 => '15-17t',
+                $years >= 18 && $years <= 21 => '18-21t',
+                $years >= 22 && $years <= 24 => '22-24t',
+                $years >= 25 && $years <= 29 => '25-29t',
+                $years >= 30 && $years <= 39 => '30-39t',
+                $years >= 40 && $years <= 44 => '40-44t',
+                $years >= 45 && $years <= 49 => '45-49t',
+                $years >= 50 && $years <= 59 => '50-59t',
+                $years >= 60 && $years <= 69 => '60-69t',
+                $years >= 70 => '70+t',
+                default => '-',
+            };
+        } catch (\Throwable) {
+            return '-';
+        }
     }
 
     public function mount()
@@ -74,7 +130,44 @@ new class extends Component {
     {
         session()->put('tahun_session', $this->tahun_session);
 
+        $this->dispatchChartRefresh();
+    }
+
+    public function updatedBulan(): void
+    {
+        $this->dispatchChartRefresh();
+    }
+
+    public function updatedDesa(): void
+    {
+        $this->dispatchChartRefresh();
+    }
+
+    public function updatedKlasterUsia(): void
+    {
+        $this->dispatchChartRefresh();
+    }
+
+    public function updatedPegawai(): void
+    {
+        $this->dispatchChartRefresh();
+    }
+
+    public function resetFilters(): void
+    {
+        $this->reset(['bulan', 'desa', 'klasterUsia', 'pegawai']);
+        $this->dispatchChartRefresh();
+    }
+
+    private function dispatchChartRefresh(): void
+    {
         $this->dispatch('dashboard-charts-updated', options: $this->chartOptions);
+    }
+
+    #[Computed]
+    public function desaOptions()
+    {
+        return $this->pasienTahunQuery()->select('kel')->whereNotNull('kel')->where('kel', '!=', '')->distinct()->orderBy('kel')->pluck('kel');
     }
 
     #[Computed]
@@ -144,10 +237,6 @@ new class extends Component {
     public function chartOptions()
     {
         $pasien = $this->filteredPasienCollection();
-        $total = max(1, $pasien->count());
-
-        $belum = $pasien->whereNull('pegawai_id')->count();
-        $sudah = $pasien->whereNotNull('pegawai_id')->count();
 
         $jenisKelamin = [
             'Laki-laki' => 0,
@@ -178,66 +267,27 @@ new class extends Component {
 
         $rankData = $this->pegawaiRank;
 
-        $registrasiLabels = [];
-        $registrasiValues = [];
+        $ageClusterLabels = ['0-28h', '1-4b', '5-11b', '1t', '2t', '3-4t', '5t', '6t', '7t', '8-9t', '10-12t', '13-14t', '15-17t', '18-21t', '22-24t', '25-29t', '30-39t', '40-44t', '45-49t', '50-59t', '60-69t', '70+t'];
 
-        if ($this->bulan !== '') {
-            $bulan = (int) $this->bulan;
-            $tanggal = Carbon::create((int) $this->tahun_session, $bulan, 1);
-            $daysInMonth = $tanggal->daysInMonth;
+        $ageClusterCounts = array_fill_keys($ageClusterLabels, 0);
 
-            $registrasiLabels = range(1, $daysInMonth);
-            $registrasiValues = array_fill(0, $daysInMonth, 0);
+        foreach ($pasien as $item) {
+            $label = $this->ageClusterLabel($item->tgl_lahir, $item->register_date);
 
-            foreach ($pasien as $item) {
-                $date = $this->parsedRegisterDate($item->register_date);
-
-                if ($date && (int) $date->year === (int) $this->tahun_session && (int) $date->month === $bulan) {
-                    $registrasiValues[$date->day - 1]++;
-                }
-            }
-        } else {
-            $registrasiLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-            $registrasiValues = array_fill(0, 12, 0);
-
-            foreach ($pasien as $item) {
-                $date = $this->parsedRegisterDate($item->register_date);
-
-                if ($date && (int) $date->year === (int) $this->tahun_session) {
-                    $registrasiValues[$date->month - 1]++;
-                }
+            if (isset($ageClusterCounts[$label])) {
+                $ageClusterCounts[$label]++;
             }
         }
 
         return [
-            'belumSudah' => [
-                'tooltip' => ['trigger' => 'item', 'formatter' => '{b}: {c} ({d}%)'],
-                'legend' => [
-                    'bottom' => '2%',
-                    'left' => 'center',
-                    'textStyle' => ['color' => '#94a3b8', 'fontSize' => 11],
-                ],
+            'klasterUsiaDistribusi' => [
                 'backgroundColor' => 'transparent',
-                'series' => [
-                    [
-                        'type' => 'pie',
-                        'radius' => ['45%', '68%'],
-                        'center' => ['50%', '45%'],
-                        'label' => ['show' => true, 'formatter' => '{b}\n{d}%', 'fontSize' => 11, 'color' => '#94a3b8'],
-                        'labelLine' => ['show' => true, 'length' => 10, 'length2' => 8],
-                        'data' => [['value' => $belum, 'name' => 'Belum Diambil', 'itemStyle' => ['color' => '#f97316']], ['value' => $sudah, 'name' => 'Sudah Diambil', 'itemStyle' => ['color' => '#22c55e']]],
-                    ],
-                ],
-            ],
-            'registrasiHarian' => [
-                'backgroundColor' => 'transparent',
-                'tooltip' => ['trigger' => 'axis', 'axisPointer' => ['type' => 'cross']],
-                'grid' => ['left' => 40, 'right' => 20, 'top' => 10, 'bottom' => 40],
+                'tooltip' => ['trigger' => 'axis', 'axisPointer' => ['type' => 'shadow']],
+                'grid' => ['left' => 45, 'right' => 20, 'top' => 10, 'bottom' => 90],
                 'xAxis' => [
                     'type' => 'category',
-                    'boundaryGap' => false,
-                    'data' => $registrasiLabels,
-                    'axisLabel' => ['color' => '#94a3b8', 'fontSize' => 10, 'interval' => $this->bulan !== '' ? 'auto' : 0],
+                    'data' => $ageClusterLabels,
+                    'axisLabel' => ['color' => '#94a3b8', 'fontSize' => 10, 'rotate' => 35, 'interval' => 0],
                     'axisLine' => ['lineStyle' => ['color' => '#e2e8f0']],
                     'splitLine' => ['show' => false],
                 ],
@@ -248,24 +298,21 @@ new class extends Component {
                 ],
                 'series' => [
                     [
-                        'name' => 'Registrasi',
-                        'type' => 'line',
-                        'smooth' => true,
-                        'symbol' => 'circle',
-                        'symbolSize' => 5,
-                        'lineStyle' => ['color' => '#6366f1', 'width' => 2.5],
-                        'itemStyle' => ['color' => '#6366f1'],
-                        'areaStyle' => [
+                        'name' => 'Jumlah Pasien',
+                        'type' => 'bar',
+                        'barMaxWidth' => 28,
+                        'itemStyle' => [
                             'color' => [
                                 'type' => 'linear',
                                 'x' => 0,
                                 'y' => 0,
                                 'x2' => 0,
                                 'y2' => 1,
-                                'colorStops' => [['offset' => 0, 'color' => 'rgba(99,102,241,0.35)'], ['offset' => 1, 'color' => 'rgba(99,102,241,0.02)']],
+                                'colorStops' => [['offset' => 0, 'color' => '#6366f1'], ['offset' => 1, 'color' => '#3b82f6']],
                             ],
+                            'borderRadius' => [6, 6, 0, 0],
                         ],
-                        'data' => $registrasiValues,
+                        'data' => array_values($ageClusterCounts),
                     ],
                 ],
             ],
@@ -319,7 +366,7 @@ new class extends Component {
                         'type' => 'pie',
                         'radius' => ['45%', '68%'],
                         'center' => ['50%', '45%'],
-                        'label' => ['show' => true, 'formatter' => '{b}\n{d}%', 'fontSize' => 11, 'color' => '#94a3b8'],
+                        'label' => ['show' => true, 'formatter' => '{b} {d}%', 'fontSize' => 11, 'color' => '#94a3b8'],
                         'labelLine' => ['show' => true, 'length' => 10, 'length2' => 8],
                         'data' => [['value' => $jenisKelamin['Laki-laki'], 'name' => 'Laki-laki', 'itemStyle' => ['color' => '#3b82f6']], ['value' => $jenisKelamin['Perempuan'], 'name' => 'Perempuan', 'itemStyle' => ['color' => '#ec4899']]],
                     ],
@@ -368,9 +415,29 @@ new class extends Component {
 ?>
 
 <script>
-    window._chartOpts = @js($this->chartOptions);
+    const syncDashboardChartOptionsFromDom = () => {
+        const holder = document.getElementById('dashboard-chart-options');
+
+        if (!holder) {
+            return;
+        }
+
+        try {
+            const options = JSON.parse(holder.dataset.options || '{}');
+            window._chartOpts = {
+                ...(window._chartOpts ?? {}),
+                ...options,
+            };
+        } catch (e) {
+            // Ignore malformed JSON and keep the previous chart options.
+        }
+    };
+
+    syncDashboardChartOptionsFromDom();
 
     const reinitDashboardCharts = () => {
+        syncDashboardChartOptionsFromDom();
+
         document.querySelectorAll('[data-chart-key]').forEach((element) => {
             const key = element.getAttribute('data-chart-key');
 
@@ -385,17 +452,34 @@ new class extends Component {
             options
         }) => {
             if (options) {
-                window._chartOpts = options;
+                window._chartOpts = {
+                    ...(window._chartOpts ?? {}),
+                    ...options,
+                };
             }
 
             requestAnimationFrame(() => {
                 reinitDashboardCharts();
             });
         });
+
+        Livewire.hook('morph.updated', () => {
+            requestAnimationFrame(() => {
+                reinitDashboardCharts();
+            });
+        });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        requestAnimationFrame(() => {
+            reinitDashboardCharts();
+        });
     });
 </script>
 
 <flux:main>
+    <div id="dashboard-chart-options" class="hidden" data-options='@json($this->chartOptions)'></div>
+
     <div class="mb-6 flex items-center justify-between gap-3">
         <flux:heading size="xl" level="1">Dashboard Capaian CKG</flux:heading>
         <flux:select wire:model.live="tahun_session" class="w-36" placeholder="Pilih tahun...">
@@ -407,6 +491,95 @@ new class extends Component {
     </div>
     <flux:separator variant="subtle" class="mb-6" />
 
+    <div x-data="{ open: false }"
+        class="mb-6 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
+        <button @click="open = !open"
+            class="flex w-full items-center justify-between px-5 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            <div class="flex items-center gap-2">
+                <flux:icon.funnel class="h-4 w-4 text-zinc-400" variant="outline" />
+                <span>Filter Data</span>
+            </div>
+            <flux:icon.chevron-down class="h-4 w-4 text-zinc-400 transition-transform duration-200"
+                ::class="{ 'rotate-180': open }" variant="outline" />
+        </button>
+        <div x-show="open" x-transition class="border-t border-zinc-200 dark:border-zinc-700 px-5 py-4">
+            <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+
+                {{-- Bulan Pelayanan --}}
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Bulan
+                        Pelayanan</label>
+                    <flux:select wire:model.live="bulan" placeholder="Semua Bulan">
+                        @foreach (['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'] as $i => $bln)
+                            <flux:select.option value="{{ $i + 1 }}">{{ $bln }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
+
+                {{-- Status Kunjungan --}}
+                {{-- Desa --}}
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Desa</label>
+                    <flux:select wire:model.live="desa" placeholder="Semua Desa">
+                        @foreach ($this->desaOptions as $desaOption)
+                            <flux:select.option value="{{ $desaOption }}">{{ $desaOption }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
+
+                {{-- Klaster Usia --}}
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Klaster Usia</label>
+                    <flux:select wire:model.live="klasterUsia" placeholder="Semua">
+                        <flux:select.option value="0-28h">0-28 hari</flux:select.option>
+                        <flux:select.option value="1-4b">1-4 Bulan</flux:select.option>
+                        <flux:select.option value="5-11b">5-11 Bulan</flux:select.option>
+                        <flux:select.option value="1t">1 Tahun</flux:select.option>
+                        <flux:select.option value="2t">2 Tahun</flux:select.option>
+                        <flux:select.option value="3-4t">3-4 Tahun</flux:select.option>
+                        <flux:select.option value="5t">5 Tahun</flux:select.option>
+                        <flux:select.option value="6t">6 Tahun</flux:select.option>
+                        <flux:select.option value="7t">7 Tahun</flux:select.option>
+                        <flux:select.option value="8-9t">8-9 Tahun</flux:select.option>
+                        <flux:select.option value="10-12t">10-12 Tahun</flux:select.option>
+                        <flux:select.option value="13-14t">13-14 Tahun</flux:select.option>
+                        <flux:select.option value="15-17t">15-17 Tahun</flux:select.option>
+                        <flux:select.option value="18-21t">18-21 Tahun</flux:select.option>
+                        <flux:select.option value="22-24t">22-24 Tahun</flux:select.option>
+                        <flux:select.option value="25-29t">25-29 Tahun</flux:select.option>
+                        <flux:select.option value="30-39t">30-39 Tahun</flux:select.option>
+                        <flux:select.option value="40-44t">40-44 Tahun</flux:select.option>
+                        <flux:select.option value="45-49t">45-49 Tahun</flux:select.option>
+                        <flux:select.option value="50-59t">50-59 Tahun</flux:select.option>
+                        <flux:select.option value="60-69t">60-69 Tahun</flux:select.option>
+                        <flux:select.option value="70+t">70 Tahun ke atas</flux:select.option>
+                    </flux:select>
+                </div>
+
+                {{-- Pegawai CKG --}}
+                {{-- <div class="col-span-2 md:col-span-1">
+                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Pegawai yang
+                        CKG</label>
+                    <flux:select wire:model="pegawai" placeholder="Semua Pegawai">
+                        <flux:select.option value="1">Budi Santoso</flux:select.option>
+                        <flux:select.option value="2">Siti Rahayu</flux:select.option>
+                        <flux:select.option value="3">Ahmad Fauzi</flux:select.option>
+                        <flux:select.option value="4">Dewi Lestari</flux:select.option>
+                        <flux:select.option value="5">Eko Prasetyo</flux:select.option>
+                    </flux:select>
+                </div> --}}
+
+                {{-- Reset Button --}}
+                <div class="flex items-end col-span-2 md:col-span-1">
+                    <flux:button wire:click="resetFilters" variant="ghost" icon="arrow-path" class="w-full">
+                        Reset Filter
+                    </flux:button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
     {{-- ===== STATS CARDS ===== --}}
     <div class="grid grid-cols-2 gap-4 xl:grid-cols-4 mb-6">
         <div
@@ -414,8 +587,8 @@ new class extends Component {
             <div>
                 <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Total Pasien</p>
                 <p class="mt-1 text-3xl font-bold text-zinc-800 dark:text-zinc-100">
-                    {{ number_format($this->jumlahPasienTahun, 0, ',', '.') }}</p>
-                <p class="mt-1 text-xs text-zinc-400">Jumlah pasien tahun {{ $tahun_session }}</p>
+                    {{ number_format($this->jumlahPasien, 0, ',', '.') }}</p>
+                <p class="mt-1 text-xs text-zinc-400">Jumlah pasien tahun {{ $this->tahun_session }}</p>
             </div>
             <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/30">
                 <flux:icon.users class="text-blue-500" variant="outline" />
@@ -466,6 +639,49 @@ new class extends Component {
     </div>
 
     {{-- ===== ROW 4: Peringkat Pegawai CKG Terbanyak ===== --}}
+
+
+    {{-- ===== FILTER PANEL ===== --}}
+
+
+    <div class="mb-6 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
+        <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Distribusi Pasien per Klaster Usia</p>
+        <p class="text-xs text-zinc-400 mb-4">Jumlah pasien berdasarkan kelompok usia</p>
+        <div wire:key="chart-klaster-{{ md5(json_encode($this->chartOptions['klasterUsiaDistribusi'])) }}"
+            data-chart-key="klasterUsiaDistribusi" x-data x-init="window._chartOpts = { ...(window._chartOpts ?? {}), klasterUsiaDistribusi: @js($this->chartOptions['klasterUsiaDistribusi']) };
+            window._initChart($el, 'klasterUsiaDistribusi')" class="h-72"></div>
+    </div>
+
+    {{-- ===== ROW 2: Horizontal Bar (Distribusi Per Desa) ===== --}}
+    {{-- <div class="mb-6 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
+        <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Distribusi Pasien Per Desa</p>
+        <p class="text-xs text-zinc-400 mb-4">Jumlah pasien berdasarkan desa domisili</p>
+        <div data-chart-key="distribusiDesa" x-data x-init="window._initChart($el, 'distribusiDesa')" class="h-72"></div>
+    </div> --}}
+
+    {{-- ===== ROW 3: Donut (L/P) + Bar Pegawai ===== --}}
+    <div class="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
+
+        {{-- Bar: Pegawai Terbanyak --}}
+        <div class="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
+            <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Distribusi Pasien Per Desa</p>
+            <p class="text-xs text-zinc-400 mb-4">Jumlah pasien berdasarkan desa domisili</p>
+            <div wire:key="chart-desa-{{ md5(json_encode($this->chartOptions['distribusiDesa'])) }}"
+                data-chart-key="distribusiDesa" x-data x-init="window._chartOpts = { ...(window._chartOpts ?? {}), distribusiDesa: @js($this->chartOptions['distribusiDesa']) };
+                window._initChart($el, 'distribusiDesa')" class="h-72"></div>
+        </div>
+
+        {{-- Donut: Laki vs Perempuan --}}
+        <div class="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
+            <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Perbandingan Jenis Kelamin</p>
+            <p class="text-xs text-zinc-400 mb-4">Laki-laki vs. Perempuan</p>
+            <div wire:key="chart-jk-{{ md5(json_encode($this->chartOptions['jenisKelamin'])) }}"
+                data-chart-key="jenisKelamin" x-data x-init="window._chartOpts = { ...(window._chartOpts ?? {}), jenisKelamin: @js($this->chartOptions['jenisKelamin']) };
+                window._initChart($el, 'jenisKelamin')" class="h-64"></div>
+        </div>
+
+    </div>
+
     <div class="mb-6 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-800">
         <div class="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -489,7 +705,8 @@ new class extends Component {
                 <tbody class="divide-y divide-zinc-100 dark:divide-zinc-700/60">
                     @foreach ($this->pegawaiRank as $pegawaiRank)
                         <tr>
-                            <td class="px-3 py-3 font-semibold text-zinc-700 dark:text-zinc-200">{{ $loop->iteration }}
+                            <td class="px-3 py-3 font-semibold text-zinc-700 dark:text-zinc-200">
+                                {{ $loop->iteration }}
                             </td>
                             <td class="px-3 py-3">{{ $pegawaiRank->nama }}</td>
                             <td class="px-3 py-3 font-medium">{{ $pegawaiRank->pasien_count }} pasien</td>
@@ -509,181 +726,6 @@ new class extends Component {
                 </tbody>
             </table>
         </div>
-    </div>
-
-    {{-- ===== FILTER PANEL ===== --}}
-    <div x-data="{ open: true }"
-        class="mb-6 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
-        <button @click="open = !open"
-            class="flex w-full items-center justify-between px-5 py-3 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-            <div class="flex items-center gap-2">
-                <flux:icon.funnel class="h-4 w-4 text-zinc-400" variant="outline" />
-                <span>Filter Data</span>
-            </div>
-            <flux:icon.chevron-down class="h-4 w-4 text-zinc-400 transition-transform duration-200"
-                ::class="{ 'rotate-180': open }" variant="outline" />
-        </button>
-        <div x-show="open" x-transition class="border-t border-zinc-200 dark:border-zinc-700 px-5 py-4">
-            <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-
-                {{-- Bulan Pelayanan --}}
-                <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Bulan
-                        Pelayanan</label>
-                    <flux:select wire:model="bulan" placeholder="Semua Bulan">
-                        @foreach (['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'] as $i => $bln)
-                            <flux:select.option value="{{ $i + 1 }}">{{ $bln }}</flux:select.option>
-                        @endforeach
-                    </flux:select>
-                </div>
-
-                {{-- Status Kunjungan --}}
-                <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Status
-                        Kunjungan</label>
-                    <flux:select wire:model="statusKunjungan" placeholder="Semua">
-                        <flux:select.option value="belum_hadir">Belum Hadir</flux:select.option>
-                        <flux:select.option value="dalam_pelayanan">Dalam Pelayanan</flux:select.option>
-                        <flux:select.option value="selesai">Selesai Layanan</flux:select.option>
-                    </flux:select>
-                </div>
-
-                {{-- Desa --}}
-                <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Desa</label>
-                    <flux:select wire:model="desa" placeholder="Semua Desa">
-                        <flux:select.option value="baruharjo">Baruharjo</flux:select.option>
-                        <flux:select.option value="kanigoro">Kanigoro</flux:select.option>
-                        <flux:select.option value="krisikan">Krisikan</flux:select.option>
-                        <flux:select.option value="pulosari">Pulosari</flux:select.option>
-                        <flux:select.option value="tegalombo">Tegalombo</flux:select.option>
-                        <flux:select.option value="gemaharjo">Gemaharjo</flux:select.option>
-                        <flux:select.option value="kasihan">Kasihan</flux:select.option>
-                        <flux:select.option value="ngreco">Ngreco</flux:select.option>
-                    </flux:select>
-                </div>
-
-                {{-- Jenis CKG --}}
-                <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Jenis CKG</label>
-                    <flux:select wire:model="jenisCkg" placeholder="Semua">
-                        <flux:select.option value="sekolah">Sekolah</flux:select.option>
-                        <flux:select.option value="umum">Umum</flux:select.option>
-                    </flux:select>
-                </div>
-
-                {{-- Klaster Usia --}}
-                <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Klaster Usia</label>
-                    <flux:select wire:model="klasterUsia" placeholder="Semua">
-                        <flux:select.option value="0-28h">0-28 hari</flux:select.option>
-                        <flux:select.option value="1-4b">1-4 Bulan</flux:select.option>
-                        <flux:select.option value="5-11b">5-11 Bulan</flux:select.option>
-                        <flux:select.option value="1t">1 Tahun</flux:select.option>
-                        <flux:select.option value="2t">2 Tahun</flux:select.option>
-                        <flux:select.option value="3-4t">3-4 Tahun</flux:select.option>
-                        <flux:select.option value="5t">5 Tahun</flux:select.option>
-                        <flux:select.option value="6t">6 Tahun</flux:select.option>
-                        <flux:select.option value="7t">7 Tahun</flux:select.option>
-                        <flux:select.option value="8-9t">8-9 Tahun</flux:select.option>
-                        <flux:select.option value="10-12t">10-12 Tahun</flux:select.option>
-                        <flux:select.option value="13-14t">13-14 Tahun</flux:select.option>
-                        <flux:select.option value="15-17t">15-17 Tahun</flux:select.option>
-                        <flux:select.option value="18-21t">18-21 Tahun</flux:select.option>
-                        <flux:select.option value="22-24t">22-24 Tahun</flux:select.option>
-                        <flux:select.option value="25-29t">25-29 Tahun</flux:select.option>
-                        <flux:select.option value="30-39t">30-39 Tahun</flux:select.option>
-                        <flux:select.option value="40-44t">40-44 Tahun</flux:select.option>
-                        <flux:select.option value="45-49t">45-49 Tahun</flux:select.option>
-                        <flux:select.option value="50-59t">50-59 Tahun</flux:select.option>
-                        <flux:select.option value="60-69t">60-69 Tahun</flux:select.option>
-                        <flux:select.option value="70+t">70 Tahun ke atas</flux:select.option>
-                    </flux:select>
-                </div>
-
-                {{-- Pekerjaan --}}
-                <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Pekerjaan</label>
-                    <flux:select wire:model="pekerjaan" placeholder="Semua Pekerjaan">
-                        <flux:select.option value="petani">Petani</flux:select.option>
-                        <flux:select.option value="buruh">Buruh</flux:select.option>
-                        <flux:select.option value="pedagang">Pedagang</flux:select.option>
-                        <flux:select.option value="pns">PNS / ASN</flux:select.option>
-                        <flux:select.option value="swasta">Karyawan Swasta</flux:select.option>
-                        <flux:select.option value="wirausaha">Wirausaha</flux:select.option>
-                        <flux:select.option value="ibu_rumah_tangga">Ibu Rumah Tangga</flux:select.option>
-                        <flux:select.option value="pelajar">Pelajar / Mahasiswa</flux:select.option>
-                        <flux:select.option value="tidak_bekerja">Tidak Bekerja</flux:select.option>
-                    </flux:select>
-                </div>
-
-                {{-- Pegawai CKG --}}
-                {{-- <div class="col-span-2 md:col-span-1">
-                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Pegawai yang
-                        CKG</label>
-                    <flux:select wire:model="pegawai" placeholder="Semua Pegawai">
-                        <flux:select.option value="1">Budi Santoso</flux:select.option>
-                        <flux:select.option value="2">Siti Rahayu</flux:select.option>
-                        <flux:select.option value="3">Ahmad Fauzi</flux:select.option>
-                        <flux:select.option value="4">Dewi Lestari</flux:select.option>
-                        <flux:select.option value="5">Eko Prasetyo</flux:select.option>
-                    </flux:select>
-                </div> --}}
-
-                {{-- Reset Button --}}
-                <div class="flex items-end col-span-2 md:col-span-1">
-                    <flux:button variant="ghost" icon="arrow-path" class="w-full">
-                        Reset Filter
-                    </flux:button>
-                </div>
-
-            </div>
-        </div>
-    </div>
-
-    {{-- ===== ROW 1: Donut (Belum/Sudah) + Line (Registrasi per hari) ===== --}}
-    <div class="grid grid-cols-1 gap-6 mb-6 xl:grid-cols-2">
-
-        {{-- Donut: Perbandingan Pemeriksaan --}}
-        <div class="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
-            <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Status Pengambilan Pasien</p>
-            <p class="text-xs text-zinc-400 mb-4">Belum diambil vs. sudah diambil</p>
-            <div data-chart-key="belumSudah" x-data x-init="window._initChart($el, 'belumSudah')" class="h-64"></div>
-        </div>
-
-        {{-- Line: Registrasi per hari --}}
-        <div class="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
-            <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Tren Registrasi</p>
-            <p class="text-xs text-zinc-400 mb-4">Jumlah registrasi per hari</p>
-            <div data-chart-key="registrasiHarian" x-data x-init="window._initChart($el, 'registrasiHarian')" class="h-64"></div>
-        </div>
-
-    </div>
-
-    {{-- ===== ROW 2: Horizontal Bar (Distribusi Per Desa) ===== --}}
-    {{-- <div class="mb-6 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
-        <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Distribusi Pasien Per Desa</p>
-        <p class="text-xs text-zinc-400 mb-4">Jumlah pasien berdasarkan desa domisili</p>
-        <div data-chart-key="distribusiDesa" x-data x-init="window._initChart($el, 'distribusiDesa')" class="h-72"></div>
-    </div> --}}
-
-    {{-- ===== ROW 3: Donut (L/P) + Bar Pegawai ===== --}}
-    <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
-
-        {{-- Bar: Pegawai Terbanyak --}}
-        <div class="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
-            <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Distribusi Pasien Per Desa</p>
-            <p class="text-xs text-zinc-400 mb-4">Jumlah pasien berdasarkan desa domisili</p>
-            <div data-chart-key="distribusiDesa" x-data x-init="window._initChart($el, 'distribusiDesa')" class="h-72"></div>
-        </div>
-
-        {{-- Donut: Laki vs Perempuan --}}
-        <div class="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
-            <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200 mb-1">Perbandingan Jenis Kelamin</p>
-            <p class="text-xs text-zinc-400 mb-4">Laki-laki vs. Perempuan</p>
-            <div data-chart-key="jenisKelamin" x-data x-init="window._initChart($el, 'jenisKelamin')" class="h-64"></div>
-        </div>
-
     </div>
 
 

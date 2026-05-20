@@ -14,6 +14,74 @@ const donutBase = {
 };
 
 window._chartOpts = {
+    klasterUsiaDistribusi: {
+        backgroundColor: "transparent",
+        tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+        grid: { left: 45, right: 20, top: 10, bottom: 90 },
+        xAxis: {
+            type: "category",
+            data: [
+                "0-28h",
+                "1-4b",
+                "5-11b",
+                "1t",
+                "2t",
+                "3-4t",
+                "5t",
+                "6t",
+                "7t",
+                "8-9t",
+                "10-12t",
+                "13-14t",
+                "15-17t",
+                "18-21t",
+                "22-24t",
+                "25-29t",
+                "30-39t",
+                "40-44t",
+                "45-49t",
+                "50-59t",
+                "60-69t",
+                "70+t",
+            ],
+            axisLabel: {
+                color: labelColor,
+                fontSize: 10,
+                rotate: 35,
+                interval: 0,
+            },
+            axisLine: { lineStyle: { color: lineColor } },
+            splitLine: { show: false },
+        },
+        yAxis: {
+            type: "value",
+            axisLabel: { color: labelColor, fontSize: 10 },
+            splitLine: { lineStyle: { color: lineColor, type: "dashed" } },
+        },
+        series: [
+            {
+                name: "Jumlah Pasien",
+                type: "bar",
+                barMaxWidth: 28,
+                itemStyle: {
+                    color: {
+                        type: "linear",
+                        x: 0,
+                        y: 0,
+                        x2: 0,
+                        y2: 1,
+                        colorStops: [
+                            { offset: 0, color: "#6366f1" },
+                            { offset: 1, color: "#3b82f6" },
+                        ],
+                    },
+                    borderRadius: [6, 6, 0, 0],
+                },
+                data: Array(22).fill(0),
+            },
+        ],
+    },
+
     belumSudah: {
         ...donutBase,
         series: [

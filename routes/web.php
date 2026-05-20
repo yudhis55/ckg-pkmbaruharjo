@@ -16,6 +16,7 @@ Route::middleware([EnsureUserHasRole::class . ':admin,user'])->group(function ()
 
 Route::middleware([EnsureUserHasRole::class . ':admin'])->group(function () {
     Route::livewire('/sinkron-data', 'pages::dashboard.sinkron-data')->name('sinkron-data');
+    Route::livewire('/sinkronisasi', 'pages::dashboard.sinkronisasi')->name('sinkronisasi');
     Route::livewire('/pengaturan', 'pages::dashboard.pengaturan')->name('pengaturan');
 });
 
