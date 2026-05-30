@@ -17,7 +17,7 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 
     @livewireStyles
-    @fluxAppearance
+    {{-- @fluxAppearance --}}
 </head>
 
 <body class="min-h-screen bg-white dark:bg-zinc-800 antialiased">
@@ -37,10 +37,12 @@
             <flux:sidebar.item icon="document-chart-bar" href="{{ route('capaian-individu') }}"
                 :current="request()->routeIs('capaian-individu')">Capaian Individu</flux:sidebar.item>
             @if (Auth::user()->role == 'admin')
-                <flux:sidebar.item icon="arrow-path" href="{{ route('sinkron-data') }}"
-                    :current="request()->routeIs('sinkron-data')">Sinkron Data</flux:sidebar.item>
+                {{-- <flux:sidebar.item icon="arrow-path" href="{{ route('sinkron-data') }}"
+                    :current="request()->routeIs('sinkron-data')">Sinkron Data</flux:sidebar.item> --}}
                 <flux:sidebar.item icon="arrow-path" href="{{ route('sinkronisasi') }}"
                     :current="request()->routeIs('sinkronisasi')">Sinkronisasi</flux:sidebar.item>
+                <flux:sidebar.item icon="arrow-path" href="{{ route('sinkronisasi-sekolah') }}"
+                    :current="request()->routeIs('sinkronisasi-sekolah')">Sinkron CKG Sekolah</flux:sidebar.item>
                 <flux:sidebar.item icon="cog-6-tooth" href="{{ route('pengaturan') }}"
                     :current="request()->routeIs('pengaturan')">Pengaturan</flux:sidebar.item>
                 <flux:sidebar.item icon="user" href="{{ route('profil-saya') }}"
@@ -49,7 +51,7 @@
 
         </flux:sidebar.nav>
         <flux:sidebar.spacer />
-        <flux:sidebar.nav>
+        {{-- <flux:sidebar.nav>
             <flux:sidebar.item>
                 <flux:radio.group x-data variant="segmented" x-model="$flux.appearance">
                     <flux:radio value="light" icon="sun" />
@@ -57,9 +59,10 @@
                     <flux:radio value="system" icon="computer-desktop" />
                 </flux:radio.group>
             </flux:sidebar.item>
-        </flux:sidebar.nav>
+        </flux:sidebar.nav> --}}
         <flux:dropdown position="top" align="start" class="max-lg:hidden">
-            <flux:sidebar.profile avatar="https://fluxui.dev/img/demo/user.png" name="{{ Auth::user()->name }}" />
+            <flux:sidebar.profile avatar:name="{{ Auth::user()->name }}" name="{{ Auth::user()->name }}"
+                avatar:color="indigo" />
             <flux:menu>
                 <flux:menu.item icon="arrow-right-start-on-rectangle">Informasi Akun</flux:menu.item>
                 <flux:menu.separator />
@@ -71,7 +74,7 @@
         <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
         <flux:spacer />
         <flux:dropdown position="top" align="start">
-            <flux:profile avatar="https://fluxui.dev/img/demo/user.png" />
+            <flux:profile avatar="{{ Auth::user()->name }}" />
             <flux:menu>
                 <flux:menu.item icon="arrow-right-start-on-rectangle">Informasi Akun</flux:menu.item>
                 <flux:menu.separator />

@@ -15,8 +15,9 @@ Route::middleware([EnsureUserHasRole::class . ':admin,user'])->group(function ()
 });
 
 Route::middleware([EnsureUserHasRole::class . ':admin'])->group(function () {
-    Route::livewire('/sinkron-data', 'pages::dashboard.sinkron-data')->name('sinkron-data');
+    // Route::livewire('/sinkron-data', 'pages::dashboard.sinkron-data')->name('sinkron-data');
     Route::livewire('/sinkronisasi', 'pages::dashboard.sinkronisasi')->name('sinkronisasi');
+    Route::livewire('/sinkronisasi-sekolah', 'pages::dashboard.sinkronisasi-sekolah')->name('sinkronisasi-sekolah');
     Route::livewire('/pengaturan', 'pages::dashboard.pengaturan')->name('pengaturan');
 });
 
