@@ -14,40 +14,30 @@ new class extends Component {
     public function syncData()
     {
         $validated = $this->validate([
-            'cookie' => ['required', 'string'],
+            'cookie'    => ['required', 'string'],
             'startDate' => ['required', 'date'],
-            'endDate' => ['required', 'date', 'after_or_equal:startDate'],
+            'endDate'   => ['required', 'date', 'after_or_equal:startDate'],
         ]);
 
+        // Kirim raw cookie header — Python service yang parse dengan attribute mapping yang benar
+        // (cf_clearance → sameSite=None, asik_web_stk/ctk/token_eksternal → httpOnly=true, dst.)
+        // Tidak perlu parseCookieHeaderToPlaywrightCookies() di Laravel lagi.
         $pythonPayload = [
-            'cookies' => $this->parseCookieHeaderToPlaywrightCookies($validated['cookie'], 'sehatindonesiaku.kemkes.go.id'),
-            'storage_state' => null,
-            'storage_state_path' => 'session_asik.json',
-            'extra_local_storage' => new \stdClass(),
-            'extra_session_storage' => new \stdClass(),
+            'cookies_header' => $validated['cookie'],
             'request' => [
-                'target_url' => 'https://sehatindonesiaku.kemkes.go.id/ckg-pendaftaran-individu',
+                'target_url'             => 'https://sehatindonesiaku.kemkes.go.id/ckg-pendaftaran-individu',
                 'list_endpoint_contains' => '/api/pkg/list-individu',
-                'headless' => false,
-                'slow_mo_ms' => 0,
-                'timeout_ms' => 300000,
-                'initial_ready_timeout_ms' => 120000,
-                'wait_after_action_ms' => 1500,
-                'selector_timeout_ms' => 30000,
-                'settle_after_filter_ms' => 3000,
+                'timeout_ms'             => 300000,
+                // Hapus timing overrides — biarkan server default yang sudah dioptimasi:
+                // headless=true, wait_after_action_ms=300, settle_after_filter_ms=500
+                // Override hanya jika site lambat:
+                // 'settle_after_filter_ms' => 2000,
+                // 'wait_after_action_ms'   => 1000,
+                'headless'               => false,  // set false untuk debug lokal
             ],
-            // 'selectors' => [
-            //     'date_input_selector' => '.mx-datepicker .mx-input-wrapper input',
-            //     'date_picker_open_selector' => '.mx-datepicker .mx-input-wrapper',
-            //     'date_picker_day_selector_templates' => ['.mx-datepicker-content td[title={date_display}]', '.mx-datepicker-content .cell[title={date_display}]', '.mx-datepicker-content td[aria-label={date_display}]'],
-            //     'date_display_format' => '%Y-%m-%d',
-            //     'date_apply_selector' => 'button:has-text(Terapkan)',
-            //     'next_page_selector' => 'ul.vpagination li.page-item:last-child',
-            //     'table_ready_selector' => 'table tbody tr',
-            // ],
             'dates' => [
                 'start_date' => $validated['startDate'],
-                'end_date' => $validated['endDate'],
+                'end_date'   => $validated['endDate'],
             ],
             'pagination' => [
                 'max_pages_per_date' => 20,
@@ -55,36 +45,49 @@ new class extends Component {
         ];
 
         try {
-            $response = Http::connectTimeout(30)->timeout(600)->acceptJson()->post('http://127.0.0.1:9999/scrape', $pythonPayload);
+            $response = Http::connectTimeout(30)
+                ->timeout(600)
+                ->acceptJson()
+                ->post('http://127.0.0.1:9999/scrape', $pythonPayload);
 
-            if (!$response->successful()) {
-                session()->flash('error', 'Sinkronisasi gagal. HTTP ' . $response->status());
+            if (! $response->successful()) {
+                session()->flash('error', 'Sinkronisasi gagal. HTTP ' . $response->status() . ': ' . $response->body());
                 return;
             }
 
             $json = $response->json();
-            if (!data_get($json, 'ok', false)) {
+
+            if (! data_get($json, 'ok', false)) {
                 session()->flash('error', 'Sinkronisasi gagal. Service mengembalikan ok=false.');
                 return;
             }
 
             $dateResults = data_get($json, 'results', []);
 
-            $allPatients = collect($dateResults)->filter(fn($r) => (bool) data_get($r, 'success', false) === true)->flatMap(fn($r) => data_get($r, 'data', []))->values()->all();
+            $allPatients = collect($dateResults)
+                ->filter(fn ($r) => (bool) data_get($r, 'success', false) === true)
+                ->flatMap(fn ($r) => data_get($r, 'data', []))
+                ->values()
+                ->all();
 
             $syncResult = $this->upsertPasiens($allPatients);
 
             foreach ($dateResults as $item) {
                 array_unshift($this->histories, [
-                    'timestamp' => now()->format('Y-m-d H:i:s'),
+                    'timestamp'           => now()->format('Y-m-d H:i:s'),
                     'tanggal_pemeriksaan' => (string) data_get($item, 'date', ''),
-                    'jumlah_data' => (int) data_get($item, 'total_data', 0),
-                    'status' => data_get($item, 'success', false) ? 'Berhasil' : 'Gagal',
-                    'error' => (string) data_get($item, 'error', ''),
+                    'jumlah_data'         => (int) data_get($item, 'total_data', 0),
+                    'status'              => data_get($item, 'success', false) ? 'Berhasil' : 'Gagal',
+                    'error'               => (string) data_get($item, 'error', ''),
                 ]);
             }
 
-            session()->flash('success', 'Sinkronisasi selesai. Dibuat: ' . $syncResult['created'] . ', diperbarui: ' . $syncResult['updated'] . ', dilewati: ' . $syncResult['skipped']);
+            session()->flash('success',
+                'Sinkronisasi selesai. ' .
+                'Dibuat: ' . $syncResult['created'] . ', ' .
+                'Diperbarui: ' . $syncResult['updated'] . ', ' .
+                'Dilewati: ' . $syncResult['skipped']
+            );
         } catch (Throwable $e) {
             session()->flash('error', 'Sinkronisasi gagal: ' . $e->getMessage());
         }
@@ -95,7 +98,7 @@ new class extends Component {
         $result = ['created' => 0, 'updated' => 0, 'skipped' => 0];
 
         foreach ($patients as $patient) {
-            $nik = (string) data_get($patient, 'patient_nik', '');
+            $nik      = (string) data_get($patient, 'patient_nik', '');
             $tglLahir = (string) data_get($patient, 'patient_born_date', '');
 
             if ($nik === '' || $tglLahir === '') {
@@ -106,20 +109,20 @@ new class extends Component {
             $pasien = Pasien::updateOrCreate(
                 ['nik' => $nik],
                 [
-                    'reg_id' => (string) data_get($patient, 'reg_id', ''),
-                    'nomor_tiket' => (string) data_get($patient, 'ticket_number', ''),
-                    'nama' => (string) data_get($patient, 'patient_full_name', ''),
-                    'tgl_lahir' => $tglLahir,
+                    'reg_id'        => (string) data_get($patient, 'reg_id', ''),
+                    'nomor_tiket'   => (string) data_get($patient, 'ticket_number', ''),
+                    'nama'          => (string) data_get($patient, 'patient_full_name', ''),
+                    'tgl_lahir'     => $tglLahir,
                     'jenis_kelamin' => (string) data_get($patient, 'patient_gender', ''),
-                    'rt_rw' => (string) data_get($patient, 'patient_domicile.address', ''),
-                    'kel' => (string) data_get($patient, 'patient_domicile.sub_district_name', ''),
-                    'kec' => (string) data_get($patient, 'patient_domicile.district_name', ''),
-                    'kab' => (string) data_get($patient, 'patient_domicile.city_name', ''),
-                    'faskes' => (string) data_get($patient, 'faskes_name', ''),
-                    'no_wa' => (string) data_get($patient, 'patient_mobile_number', ''),
+                    'rt_rw'         => (string) data_get($patient, 'patient_domicile.address', ''),
+                    'kel'           => (string) data_get($patient, 'patient_domicile.sub_district_name', ''),
+                    'kec'           => (string) data_get($patient, 'patient_domicile.district_name', ''),
+                    'kab'           => (string) data_get($patient, 'patient_domicile.city_name', ''),
+                    'faskes'        => (string) data_get($patient, 'faskes_name', ''),
+                    'no_wa'         => (string) data_get($patient, 'patient_mobile_number', ''),
                     'register_date' => (string) data_get($patient, 'register_date', ''),
-                    'tahun' => (string) data_get($patient, 'screening_year', ''),
-                    'pegawai_id' => null,
+                    'tahun'         => (string) data_get($patient, 'screening_year', ''),
+                    'pegawai_id'    => null,
                 ],
             );
 
@@ -132,60 +135,31 @@ new class extends Component {
 
         return $result;
     }
-
-    protected function parseCookieHeaderToPlaywrightCookies(string $cookieHeader, string $domain): array
-    {
-        $parts = preg_split('/;\\s*/', trim($cookieHeader));
-        $cookies = [];
-
-        foreach ($parts as $part) {
-            if (!str_contains($part, '=')) {
-                continue;
-            }
-
-            [$name, $value] = explode('=', $part, 2);
-            $name = trim($name);
-            $value = trim($value);
-
-            if ($name === '' || $value === '') {
-                continue;
-            }
-
-            $isHttpOnly = in_array($name, ['asik_web_ctk', 'token_eksternal'], true);
-            $sameSite = $isHttpOnly ? 'None' : 'Lax';
-
-            $cookies[] = [
-                'name' => $name,
-                'value' => $value,
-                'domain' => $domain,
-                'path' => '/',
-                'secure' => true,
-                'httpOnly' => $isHttpOnly,
-                'sameSite' => $sameSite,
-            ];
-        }
-
-        return $cookies;
-    }
 };
 ?>
 
 <flux:main>
     <div class="mb-6 flex items-center justify-between gap-3">
-        <flux:heading size="xl" level="1">Sinkronisasi Data</flux:heading>
+        <flux:heading size="xl" level="1">Sinkronisasi Data CKG Umum</flux:heading>
     </div>
     <flux:separator variant="subtle" class="mb-6" />
 
     <div class="mb-6 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-5">
         <div class="mb-4">
             <p class="text-sm font-semibold text-zinc-700 dark:text-zinc-200">Form Sinkronisasi Data</p>
-            <p class="text-xs text-zinc-400">Sinkronkan data pasien dari sistem eksternal</p>
+            <p class="text-xs text-zinc-400">
+                Tempel cookie dari browser DevTools (F12 → Network → pilih request ke sehatindonesiaku → copy nilai header Cookie)
+            </p>
         </div>
 
         <form wire:submit.prevent="syncData" class="space-y-4">
             <div>
-                <flux:label>Cookie</flux:label>
-                <flux:textarea wire:model.defer="cookie" rows="6" placeholder="Tempel cookie string di sini" />
+                <flux:label>Cookie Header</flux:label>
+                <flux:textarea
+                    wire:model.defer="cookie"
+                    rows="4"
+                    placeholder="asik_web_stk=...; asik_web_ctk=...; access_menu=...; token_eksternal=..."
+                />
                 @error('cookie')
                     <flux:error>{{ $message }}</flux:error>
                 @enderror
@@ -199,7 +173,6 @@ new class extends Component {
                         <flux:error>{{ $message }}</flux:error>
                     @enderror
                 </div>
-
                 <div>
                     <flux:label>Tanggal Akhir</flux:label>
                     <flux:input type="date" wire:model.defer="endDate" />
@@ -217,20 +190,14 @@ new class extends Component {
     </div>
 
     @if (session('success'))
-        <div
-            class="mb-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 dark:border-green-900/30 dark:bg-green-900/20">
-            <p class="text-sm font-medium text-green-800 dark:text-green-200">
-                {{ session('success') }}
-            </p>
+        <div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 dark:border-green-900/30 dark:bg-green-900/20">
+            <p class="text-sm font-medium text-green-800 dark:text-green-200">{{ session('success') }}</p>
         </div>
     @endif
 
     @if (session('error'))
-        <div
-            class="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 dark:border-red-900/30 dark:bg-red-900/20">
-            <p class="text-sm font-medium text-red-800 dark:text-red-200">
-                {{ session('error') }}
-            </p>
+        <div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 dark:border-red-900/30 dark:bg-red-900/20">
+            <p class="text-sm font-medium text-red-800 dark:text-red-200">{{ session('error') }}</p>
         </div>
     @endif
 
@@ -257,11 +224,9 @@ new class extends Component {
                             <flux:table.cell>{{ $history['jumlah_data'] ?? 0 }}</flux:table.cell>
                             <flux:table.cell>
                                 @if (($history['status'] ?? '') === 'Berhasil')
-                                    <span
-                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">Berhasil</span>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">Berhasil</span>
                                 @else
-                                    <span
-                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200">Gagal</span>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200">Gagal</span>
                                 @endif
                             </flux:table.cell>
                             <flux:table.cell>{{ $history['error'] ?? '-' }}</flux:table.cell>
