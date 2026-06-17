@@ -95,7 +95,7 @@ new class extends Component {
                     'nama' => (string) data_get($patient, 'patient_full_name', ''),
                     'tgl_lahir' => $tglLahir,
                     'jenis_kelamin' => (string) data_get($patient, 'patient_gender', ''),
-                    'rt_rw' => (string) data_get($patient, 'patient_domicile.address', ''),
+                    'alamat' => (string) data_get($patient, 'patient_domicile.address', ''),
                     'kel' => (string) data_get($patient, 'patient_domicile.sub_district_name', ''),
                     'kec' => (string) data_get($patient, 'patient_domicile.district_name', ''),
                     'kab' => (string) data_get($patient, 'patient_domicile.city_name', ''),

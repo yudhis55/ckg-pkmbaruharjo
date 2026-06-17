@@ -2,6 +2,8 @@
 
 use Livewire\Component;
 use Livewire\WithPagination;
+use Livewire\WithFileUploads;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Livewire\Attributes\Computed;
 use App\Models\Pasien;
 use App\Models\Pegawai;
@@ -10,7 +12,7 @@ use Carbon\Carbon;
 use Livewire\Attributes\Session;
 
 new class extends Component {
-    use WithPagination;
+    use WithPagination, WithFileUploads;
 
     #[Session(key: 'tahun_session')]
     public $tahun_session;
@@ -23,6 +25,7 @@ new class extends Component {
     public $selectedPasienIds = [];
     public $selectedPasienId;
     public $selectedPegawaiId;
+    public $excelFile;
 
     public function mount()
     {
@@ -42,7 +45,7 @@ new class extends Component {
     #[Computed]
     public function desa()
     {
-        return Pasien::distinct('kel')->pluck('kel');
+        return Pasien::where('tipe', 'umum')->distinct('kel')->pluck('kel');
     }
 
     #[Computed]
@@ -55,6 +58,7 @@ new class extends Component {
     public function pasien()
     {
         return Pasien::query()
+            ->where('tipe', 'umum')
             ->with('pegawai:id,nama')
             ->when($this->search !== '', function ($query) {
                 $query->where(function ($subQuery) {
@@ -69,7 +73,7 @@ new class extends Component {
             ->when($this->filterStatus === 'sudah', fn($query) => $query->whereNotNull('pegawai_id'))
             ->when($this->filterStatus === 'belum', fn($query) => $query->whereNull('pegawai_id'))
             ->when($this->filterDesa !== '', fn($query) => $query->where('kel', $this->filterDesa))
-            ->latest('id')
+            ->latest('register_date')
             ->paginate($this->perPage);
     }
 
@@ -140,21 +144,102 @@ new class extends Component {
     #[Computed]
     public function jumlahPasien()
     {
-        return Pasien::where('tahun', $this->tahun_session)->count();
+        return Pasien::where('tipe', 'umum')->where('tahun', $this->tahun_session)->count();
     }
 
     #[Computed]
     public function jumlahPasienBelumDiambil()
     {
-        return Pasien::where('tahun', $this->tahun_session)->whereNull('pegawai_id')->count();
+        return Pasien::where('tipe', 'umum')->where('tahun', $this->tahun_session)->whereNull('pegawai_id')->count();
     }
 
     #[Computed]
     public function jumlahPasienSudahDiambil()
     {
-        return Pasien::where('tahun', $this->tahun_session)->whereNotNull('pegawai_id')->count();
+        return Pasien::where('tipe', 'umum')->where('tahun', $this->tahun_session)->whereNotNull('pegawai_id')->count();
     }
 
+    public function importFromExcel()
+    {
+        $this->validate([
+            'excelFile' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:2048'],
+        ]);
+
+        $pegawai_id = Auth::user()->pegawai_id;
+
+        if (!$pegawai_id && Auth::user()->role !== 'admin') {
+            flash()->use('theme.ruby')->option('position', 'bottom-right')->error('Akun Anda tidak terhubung ke data pegawai.');
+            return;
+        }
+
+        try {
+            $spreadsheet = IOFactory::load($this->excelFile->getRealPath());
+            $sheet = $spreadsheet->getActiveSheet();
+            $rows = $sheet->toArray();
+
+            // Find NIK column in header row
+            $nikColIndex = null;
+            if (!empty($rows)) {
+                $header = array_map(fn($cell) => strtolower(trim((string) $cell)), $rows[0]);
+                foreach ($header as $index => $col) {
+                    if ($col === 'nik') {
+                        $nikColIndex = $index;
+                        break;
+                    }
+                }
+            }
+
+            if ($nikColIndex === null) {
+                flash()->use('theme.ruby')->option('position', 'bottom-right')->error('Kolom "NIK" tidak ditemukan di file Excel.');
+                return;
+            }
+
+            $niks = [];
+            for ($i = 1; $i < count($rows); $i++) {
+                $nik = trim((string) ($rows[$i][$nikColIndex] ?? ''));
+                if ($nik !== '') {
+                    $niks[] = $nik;
+                }
+            }
+
+            if (empty($niks)) {
+                flash()->use('theme.ruby')->option('position', 'bottom-right')->warning('Tidak ada data NIK yang ditemukan di file.');
+                return;
+            }
+
+            $claimed = 0;
+            $notFound = 0;
+            $alreadyClaimed = 0;
+
+            foreach ($niks as $nik) {
+                $pasien = Pasien::where('tipe', 'umum')
+                    ->where('tahun', $this->tahun_session)
+                    ->where('nik', $nik)
+                    ->first();
+
+                if (!$pasien) {
+                    $notFound++;
+                    continue;
+                }
+
+                if ($pasien->pegawai_id) {
+                    $alreadyClaimed++;
+                    continue;
+                }
+
+                $pasien->update(['pegawai_id' => $pegawai_id]);
+                $claimed++;
+            }
+
+            Flux::modals()->close();
+            flash()->use('theme.ruby')->option('position', 'bottom-right')
+                ->success("Impor selesai. Diklaim: {$claimed}, Sudah diklaim: {$alreadyClaimed}, Tidak ditemukan: {$notFound}");
+        } catch (\Throwable $e) {
+            flash()->use('theme.ruby')->option('position', 'bottom-right')->error('Gagal memproses file: ' . $e->getMessage());
+        } finally {
+            $this->reset('excelFile');
+        }
+    }
     public function updatedSearch(): void
     {
         $this->resetPage();
@@ -307,7 +392,9 @@ new class extends Component {
             <flux:modal.trigger name="filter-pasien">
                 <flux:button variant="ghost" icon="funnel">Filter</flux:button>
             </flux:modal.trigger>
-            <flux:button variant="outline" icon="document-text">Impor dari Excel</flux:button>
+            <flux:modal.trigger name="import-excel">
+                <flux:button variant="outline" icon="document-text">Impor dari Excel</flux:button>
+            </flux:modal.trigger>
             <flux:button wire:click="ambilMultiPasien" x-cloak x-show="$wire.selectedPasienIds.length > 0"
                 icon="users">Ambil <span x-text="$wire.selectedPasienIds.length"></span> Pasien</flux:button>
         </div>
@@ -433,4 +520,35 @@ new class extends Component {
         </flux:modal>
     @endif
 
+
+    <flux:modal name="import-excel" class="md:w-[28rem]">
+        <form wire:submit="importFromExcel">
+            <div class="space-y-6">
+                <div>
+                    <flux:heading size="lg">Impor Pasien dari Excel</flux:heading>
+                    <flux:text class="mt-1" variant="subtle">Upload file Excel (.xlsx/.xls/.csv) yang berisi kolom NIK untuk klaim pasien.</flux:text>
+                </div>
+
+                <div>
+                    <flux:label>File Excel</flux:label>
+                    <input type="file" wire:model="excelFile" accept=".xlsx,.xls,.csv"
+                        class="mt-1 block w-full text-sm text-zinc-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/30 dark:file:text-blue-300" />
+                    @error('excelFile')
+                        <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                    <p class="mt-2 text-xs text-zinc-400">File harus memiliki kolom header "NIK". Maksimal 2MB.</p>
+                </div>
+
+                <div class="flex justify-end gap-2">
+                    <flux:modal.close>
+                        <flux:button variant="ghost">Batal</flux:button>
+                    </flux:modal.close>
+                    <flux:button type="submit" variant="primary" wire:loading.attr="disabled">
+                        <span wire:loading.remove wire:target="importFromExcel">Impor & Klaim</span>
+                        <span wire:loading wire:target="importFromExcel">Memproses...</span>
+                    </flux:button>
+                </div>
+            </div>
+        </form>
+    </flux:modal>
 </flux:main>

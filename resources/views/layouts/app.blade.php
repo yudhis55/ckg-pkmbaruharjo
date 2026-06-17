@@ -36,6 +36,8 @@
                 Klaim Pasien</flux:sidebar.item>
             <flux:sidebar.item icon="document-chart-bar" href="{{ route('capaian-individu') }}"
                 :current="request()->routeIs('capaian-individu')">Capaian Individu</flux:sidebar.item>
+            <flux:sidebar.item icon="document-chart-bar" href="{{ route('pasien-emr') }}"
+                :current="request()->routeIs('pasien-emr')">Pasien EMR</flux:sidebar.item>
             @if (Auth::user()->role == 'admin')
                 {{-- <flux:sidebar.item icon="arrow-path" href="{{ route('sinkron-data') }}"
                     :current="request()->routeIs('sinkron-data')">Sinkron Data</flux:sidebar.item> --}}
@@ -43,6 +45,8 @@
                     :current="request()->routeIs('sinkronisasi')">Sinkronisasi</flux:sidebar.item>
                 <flux:sidebar.item icon="arrow-path" href="{{ route('sinkronisasi-sekolah') }}"
                     :current="request()->routeIs('sinkronisasi-sekolah')">Sinkron CKG Sekolah</flux:sidebar.item>
+                <flux:sidebar.item icon="arrow-path" href="{{ route('sinkronisasi-emr') }}"
+                    :current="request()->routeIs('sinkronisasi-emr')">Sinkron EMR</flux:sidebar.item>
                 <flux:sidebar.item icon="cog-6-tooth" href="{{ route('pengaturan') }}"
                     :current="request()->routeIs('pengaturan')">Pengaturan</flux:sidebar.item>
                 <flux:sidebar.item icon="user" href="{{ route('profil-saya') }}"

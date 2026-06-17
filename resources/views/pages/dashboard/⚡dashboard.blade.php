@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 use Livewire\Component;
 use Livewire\Attributes\Session;
@@ -16,10 +16,14 @@ new class extends Component {
     public string $desa = '';
     public string $klasterUsia = '';
     public string $pegawai = '';
+    public string $tipe = '';
 
     private function pasienTahunQuery()
     {
-        return Pasien::query()->where('tahun', (string) $this->tahun_session);
+        return Pasien::query()
+            ->when($this->tipe !== '', fn($q) => $q->where('tipe', $this->tipe))
+            ->when($this->tipe === '', fn($q) => $q->whereIn('tipe', ['umum', 'sekolah']))
+            ->where('tahun', (string) $this->tahun_session);
     }
 
     private function parsedRegisterDate(?string $value): ?Carbon
@@ -153,9 +157,14 @@ new class extends Component {
         $this->dispatchChartRefresh();
     }
 
+    public function updatedTipe(): void
+    {
+        $this->dispatchChartRefresh();
+    }
+
     public function resetFilters(): void
     {
-        $this->reset(['bulan', 'desa', 'klasterUsia', 'pegawai']);
+        $this->reset(['bulan', 'desa', 'klasterUsia', 'pegawai', 'tipe']);
         $this->dispatchChartRefresh();
     }
 
@@ -556,6 +565,15 @@ new class extends Component {
                     </flux:select>
                 </div>
 
+
+                {{-- Jenis Pasien --}}
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Jenis Pasien</label>
+                    <flux:select wire:model.live="tipe" placeholder="Semua">
+                        <flux:select.option value="umum">Umum</flux:select.option>
+                        <flux:select.option value="sekolah">Sekolah</flux:select.option>
+                    </flux:select>
+                </div>
                 {{-- Pegawai CKG --}}
                 {{-- <div class="col-span-2 md:col-span-1">
                     <label class="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">Pegawai yang

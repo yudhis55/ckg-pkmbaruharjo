@@ -19,12 +19,15 @@ return new class extends Migration
             $table->string('nama');
             $table->date('tgl_lahir');
             $table->string('jenis_kelamin');
-            $table->string('rt_rw');
+            $table->string('alamat');
             $table->string('kel');
             $table->string('kec');
             $table->string('kab');
             $table->string('faskes');
             $table->string('no_wa');
+            $table->enum('tipe', ['umum', 'sekolah', 'emr']);
+            $table->string('sekolah')->nullable();
+            $table->string('kelas')->nullable();
             $table->string('register_date');
             $table->string('tahun');
             $table->foreignId('pegawai_id')->nullable()->constrained('pegawai')->nullOnDelete();
