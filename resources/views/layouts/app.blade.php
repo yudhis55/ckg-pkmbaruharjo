@@ -36,13 +36,13 @@
                 Klaim Pasien</flux:sidebar.item>
             <flux:sidebar.item icon="document-chart-bar" href="{{ route('capaian-individu') }}"
                 :current="request()->routeIs('capaian-individu')">Capaian Individu</flux:sidebar.item>
-            <flux:sidebar.item icon="document-chart-bar" href="{{ route('pasien-emr') }}"
+            <flux:sidebar.item icon="clipboard-document-list" href="{{ route('pasien-emr') }}"
                 :current="request()->routeIs('pasien-emr')">Pasien EMR</flux:sidebar.item>
             @if (Auth::user()->role == 'admin')
                 {{-- <flux:sidebar.item icon="arrow-path" href="{{ route('sinkron-data') }}"
                     :current="request()->routeIs('sinkron-data')">Sinkron Data</flux:sidebar.item> --}}
                 <flux:sidebar.item icon="arrow-path" href="{{ route('sinkronisasi') }}"
-                    :current="request()->routeIs('sinkronisasi')">Sinkronisasi</flux:sidebar.item>
+                    :current="request()->routeIs('sinkronisasi')">Sinkron CKG Umum</flux:sidebar.item>
                 <flux:sidebar.item icon="arrow-path" href="{{ route('sinkronisasi-sekolah') }}"
                     :current="request()->routeIs('sinkronisasi-sekolah')">Sinkron CKG Sekolah</flux:sidebar.item>
                 <flux:sidebar.item icon="arrow-path" href="{{ route('sinkronisasi-emr') }}"
@@ -68,7 +68,7 @@
             <flux:sidebar.profile avatar:name="{{ Auth::user()->name }}" name="{{ Auth::user()->name }}"
                 avatar:color="indigo" />
             <flux:menu>
-                <flux:menu.item icon="arrow-right-start-on-rectangle">Informasi Akun</flux:menu.item>
+                <flux:menu.item icon="information-circle">Informasi Akun</flux:menu.item>
                 <flux:menu.separator />
                 <livewire:auth.logout />
             </flux:menu>
@@ -80,7 +80,7 @@
         <flux:dropdown position="top" align="start">
             <flux:profile avatar="{{ Auth::user()->name }}" />
             <flux:menu>
-                <flux:menu.item icon="arrow-right-start-on-rectangle">Informasi Akun</flux:menu.item>
+                <flux:menu.item icon="information-circle">Informasi Akun</flux:menu.item>
                 <flux:menu.separator />
                 <livewire:auth.logout />
             </flux:menu>

@@ -22,6 +22,7 @@ new class extends Component {
     public $filterTahun = '';
     public $filterStatus = '';
     public $filterDesa = '';
+    public $filterTipe = '';
     public $selectedPasienIds = [];
     public $selectedPasienId;
     public $selectedPegawaiId;
@@ -45,7 +46,9 @@ new class extends Component {
     #[Computed]
     public function desa()
     {
-        return Pasien::where('tipe', 'umum')->distinct('kel')->pluck('kel');
+        return Pasien::whereIn('tipe', ['umum', 'sekolah'])
+            ->distinct('kel')
+            ->pluck('kel');
     }
 
     #[Computed]
@@ -58,7 +61,8 @@ new class extends Component {
     public function pasien()
     {
         return Pasien::query()
-            ->where('tipe', 'umum')
+            ->when($this->filterTipe !== '', fn($q) => $q->where('tipe', $this->filterTipe))
+            ->when($this->filterTipe === '', fn($q) => $q->whereIn('tipe', ['umum', 'sekolah']))
             ->with('pegawai:id,nama')
             ->when($this->search !== '', function ($query) {
                 $query->where(function ($subQuery) {
@@ -144,25 +148,33 @@ new class extends Component {
     #[Computed]
     public function jumlahPasien()
     {
-        return Pasien::where('tipe', 'umum')->where('tahun', $this->tahun_session)->count();
+        return Pasien::whereIn('tipe', ['umum', 'sekolah'])
+            ->where('tahun', $this->tahun_session)
+            ->count();
     }
 
     #[Computed]
     public function jumlahPasienBelumDiambil()
     {
-        return Pasien::where('tipe', 'umum')->where('tahun', $this->tahun_session)->whereNull('pegawai_id')->count();
+        return Pasien::whereIn('tipe', ['umum', 'sekolah'])
+            ->where('tahun', $this->tahun_session)
+            ->whereNull('pegawai_id')
+            ->count();
     }
 
     #[Computed]
     public function jumlahPasienSudahDiambil()
     {
-        return Pasien::where('tipe', 'umum')->where('tahun', $this->tahun_session)->whereNotNull('pegawai_id')->count();
+        return Pasien::whereIn('tipe', ['umum', 'sekolah'])
+            ->where('tahun', $this->tahun_session)
+            ->whereNotNull('pegawai_id')
+            ->count();
     }
 
     public function importFromExcel()
     {
         $this->validate([
-            'excelFile' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:2048'],
+            'excelFile' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:10240'],
         ]);
 
         $pegawai_id = Auth::user()->pegawai_id;
@@ -209,10 +221,11 @@ new class extends Component {
 
             $claimed = 0;
             $notFound = 0;
-            $alreadyClaimed = 0;
+            $alreadyMine = 0;
+            $claimedByOthers = 0;
 
             foreach ($niks as $nik) {
-                $pasien = Pasien::where('tipe', 'umum')
+                $pasien = Pasien::whereIn('tipe', ['umum', 'sekolah'])
                     ->where('tahun', $this->tahun_session)
                     ->where('nik', $nik)
                     ->first();
@@ -223,7 +236,11 @@ new class extends Component {
                 }
 
                 if ($pasien->pegawai_id) {
-                    $alreadyClaimed++;
+                    if ($pasien->pegawai_id == $pegawai_id) {
+                        $alreadyMine++;
+                    } else {
+                        $claimedByOthers++;
+                    }
                     continue;
                 }
 
@@ -232,10 +249,28 @@ new class extends Component {
             }
 
             Flux::modals()->close();
-            flash()->use('theme.ruby')->option('position', 'bottom-right')
-                ->success("Impor selesai. Diklaim: {$claimed}, Sudah diklaim: {$alreadyClaimed}, Tidak ditemukan: {$notFound}");
+
+            $msg = "Impor selesai. Berhasil diklaim: {$claimed}";
+            if ($alreadyMine > 0) {
+                $msg .= ", Sudah Anda klaim sebelumnya: {$alreadyMine}";
+            }
+            if ($claimedByOthers > 0) {
+                $msg .= ", Sudah diklaim orang lain: {$claimedByOthers}";
+            }
+            if ($notFound > 0) {
+                $msg .= ", NIK tidak ditemukan: {$notFound}";
+            }
+
+            if ($claimedByOthers > 0) {
+                flash()->use('theme.ruby')->option('position', 'bottom-right')->warning($msg);
+            } else {
+                flash()->use('theme.ruby')->option('position', 'bottom-right')->success($msg);
+            }
         } catch (\Throwable $e) {
-            flash()->use('theme.ruby')->option('position', 'bottom-right')->error('Gagal memproses file: ' . $e->getMessage());
+            flash()
+                ->use('theme.ruby')
+                ->option('position', 'bottom-right')
+                ->error('Gagal memproses file: ' . $e->getMessage());
         } finally {
             $this->reset('excelFile');
         }
@@ -265,9 +300,14 @@ new class extends Component {
         $this->resetPage();
     }
 
+    public function updatedFilterTipe(): void
+    {
+        $this->resetPage();
+    }
+
     public function resetFilters(): void
     {
-        $this->reset(['filterTahun', 'filterStatus', 'filterDesa']);
+        $this->reset(['filterTahun', 'filterStatus', 'filterDesa', 'filterTipe']);
         $this->resetPage();
     }
 };
@@ -279,7 +319,8 @@ new class extends Component {
 
         <flux:select wire:model.live="tahun_session" class="w-36" placeholder="Pilih tahun...">
             @foreach ($this->tahun as $tahun)
-                <flux:select.option value="{{ $tahun->tahun }}">{{ $tahun->tahun }} {{ $tahun->is_active ? '(Aktif)' : '' }}</flux:select.option>
+                <flux:select.option value="{{ $tahun->tahun }}">{{ $tahun->tahun }}
+                    {{ $tahun->is_active ? '(Aktif)' : '' }}</flux:select.option>
             @endforeach
         </flux:select>
     </div>
@@ -348,7 +389,8 @@ new class extends Component {
         <div
             class="relative rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-5 py-4 flex items-start justify-between">
             <div>
-                <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Pasien Sudah Diambil</p>
+                <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Pasien Sudah
+                    Diambil</p>
                 <p class="mt-1 text-3xl font-bold text-zinc-800 dark:text-zinc-100">
                     {{ $this->jumlahPasienSudahDiambil }}
                 </p>
@@ -361,7 +403,8 @@ new class extends Component {
         <div
             class="relative rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-5 py-4 flex items-start justify-between">
             <div>
-                <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Pasien Belum Diambil</p>
+                <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Pasien Belum
+                    Diambil</p>
                 <p class="mt-1 text-3xl font-bold text-zinc-800 dark:text-zinc-100">
                     {{ $this->jumlahPasienBelumDiambil }}
                 </p>
@@ -393,7 +436,7 @@ new class extends Component {
                 <flux:button variant="ghost" icon="funnel">Filter</flux:button>
             </flux:modal.trigger>
             <flux:modal.trigger name="import-excel">
-                <flux:button variant="outline" icon="document-text">Impor dari Excel</flux:button>
+                <flux:button variant="primary" color="sky" icon="document-text">Klaim dari Excel</flux:button>
             </flux:modal.trigger>
             <flux:button wire:click="ambilMultiPasien" x-cloak x-show="$wire.selectedPasienIds.length > 0"
                 icon="users">Ambil <span x-text="$wire.selectedPasienIds.length"></span> Pasien</flux:button>
@@ -414,16 +457,20 @@ new class extends Component {
                     <flux:select.option value="sudah">Sudah Diambil</flux:select.option>
                 </flux:select>
 
-                    <flux:select wire:model.live="filterDesa" placeholder="Filter Desa">
-                        <flux:select.option value="Baruharjo">Baruharjo</flux:select.option>
-                        <flux:select.option value="Kanigoro">Kanigoro</flux:select.option>
-                        <flux:select.option value="Krisikan">Krisikan</flux:select.option>
-                        <flux:select.option value="Pulosari">Pulosari</flux:select.option>
-                        <flux:select.option value="Tegalombo">Tegalombo</flux:select.option>
-                        <flux:select.option value="Gemaharjo">Gemaharjo</flux:select.option>
-                        <flux:select.option value="Kasihan">Kasihan</flux:select.option>
-                        <flux:select.option value="Ngreco">Ngreco</flux:select.option>
-                    </flux:select>
+                <flux:select wire:model.live="filterDesa" placeholder="Filter Desa">
+                    <flux:select.option value="Gador">Gador</flux:select.option>
+                    <flux:select.option value="Karanganom">Karanganom</flux:select.option>
+                    <flux:select.option value="Pakis">Pakis</flux:select.option>
+                    <flux:select.option value="Kamulan">Kamulan</flux:select.option>
+                    <flux:select.option value="Sumberejo">Sumberejo</flux:select.option>
+                    <flux:select.option value="Sumbergayam">Sumbergayam</flux:select.option>
+                    <flux:select.option value="Baruharjo">Baruharjo</flux:select.option>
+                </flux:select>
+
+                <flux:select wire:model.live="filterTipe" placeholder="Jenis Pasien">
+                    <flux:select.option value="umum">Umum</flux:select.option>
+                    <flux:select.option value="sekolah">Sekolah</flux:select.option>
+                </flux:select>
             </div>
 
             <div class="flex items-center justify-end gap-2">
@@ -500,10 +547,12 @@ new class extends Component {
                 <div class="space-y-6">
                     <div>
                         <flux:heading size="lg">Ambil Pasien untuk Pegawai</flux:heading>
-                        <flux:text class="mt-1" variant="subtle">Pilih pegawai yang akan mengambil pasien</flux:text>
+                        <flux:text class="mt-1" variant="subtle">Pilih pegawai yang akan mengambil pasien
+                        </flux:text>
                     </div>
                     {{-- <flux:input wire:model="" label="" placeholder="" /> --}}
-                    <flux:select wire:model.live="selectedPegawaiId" label="Pilih Pegawai" placeholder="Pilih pegawai...">
+                    <flux:select wire:model.live="selectedPegawaiId" label="Pilih Pegawai"
+                        placeholder="Pilih pegawai...">
                         @foreach ($this->pegawai as $pegawai)
                             <flux:select.option value="{{ $pegawai->id }}">{{ $pegawai->nama }}</flux:select.option>
                         @endforeach
@@ -526,7 +575,8 @@ new class extends Component {
             <div class="space-y-6">
                 <div>
                     <flux:heading size="lg">Impor Pasien dari Excel</flux:heading>
-                    <flux:text class="mt-1" variant="subtle">Upload file Excel (.xlsx/.xls/.csv) yang berisi kolom NIK untuk klaim pasien.</flux:text>
+                    <flux:text class="mt-1" variant="subtle">Upload file Excel (.xlsx/.xls/.csv) yang berisi kolom
+                        NIK untuk klaim pasien.</flux:text>
                 </div>
 
                 <div>
@@ -536,7 +586,7 @@ new class extends Component {
                     @error('excelFile')
                         <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                     @enderror
-                    <p class="mt-2 text-xs text-zinc-400">File harus memiliki kolom header "NIK". Maksimal 2MB.</p>
+                    <p class="mt-2 text-xs text-zinc-400">File harus memiliki kolom "NIK" di baris pertama.</p>
                 </div>
 
                 <div class="flex justify-end gap-2">
